@@ -42,72 +42,6 @@ PROMPT_MODES = [usertypes.KeyMode.prompt, usertypes.KeyMode.yesno]
 ParserDictType = MutableMapping[usertypes.KeyMode, basekeyparser.BaseKeyParser]
 
 
-@dataclasses.dataclass(frozen=True)
-class KeyEvent:
-
-    """A small wrapper over a QKeyEvent storing its data.
-
-    This is needed because Qt apparently mutates existing events with new data.
-    It doesn't store the modifiers because they can be different for a key
-    press/release.
-
-    Attributes:
-        key: A Qt.Key member (QKeyEvent::key).
-        text: A string (QKeyEvent::text).
-    """
-
-    key: Qt.Key
-    text: str
-
-    @classmethod
-    def from_event(cls, event: QKeyEvent) -> 'KeyEvent':
-        """Initialize a KeyEvent from a QKeyEvent."""
-        return cls(Qt.Key(event.key()), event.text())
-
-@dataclasses.dataclass(frozen=False)
-class QueuedKeyEventPair:
-
-    # TODO: docs
-    """A wrapper over a QKeyEvent capable of recreating the event.
-
-    This is needed to recreate any queued events when either a timeout occurs
-    or a match is not completed.
-
-    Attributes:
-        key_event: A KeyEvent member for comparison.
-        key_info: A keyutils.KeyInfo member for complete event reconstruction
-                  (e.g. with modifiers).
-        typ: QEvent.KeyPress or QEvent.KeyRelease.
-    """
-
-    key_event: KeyEvent
-    key_info_press: keyutils.KeyInfo
-    key_info_release: keyutils.KeyInfo
-
-    @classmethod
-    def from_event_press(cls, event: QKeyEvent) -> 'QueuedKeyEventPair':
-        """Initialize a QueuedKeyEventPair from a QKeyEvent and QKeyEvent."""
-        return cls(KeyEvent.from_event(event),
-                   keyutils.KeyInfo.from_event(event), None)
-
-    def add_event_release(self, event: QKeyEvent) -> bool:
-        if self.key_event == KeyEvent.from_event(event):
-            self.key_info_release = keyutils.KeyInfo.from_event(event)
-            return True
-        return False
-
-    def is_released(self):
-        return self.key_info_release is not None
-
-    def to_events(self) -> Tuple[QKeyEvent]:
-        """Get a QKeyEvent from this QueuedEvent."""
-        if self.key_info_release is None:
-            return (self.key_info_press.to_event(QEvent.KeyPress),)
-        else:
-            return (self.key_info_press.to_event(QEvent.KeyPress),
-                    self.key_info_release.to_event(QEvent.KeyRelease))
-
-
 class NotInModeError(Exception):
 
     """Exception raised when we want to leave a mode we're not in."""
@@ -315,7 +249,7 @@ class ModeManager(QObject):
         self.parsers: ParserDictType = {}
         self._prev_mode = usertypes.KeyMode.normal
         self.mode = usertypes.KeyMode.normal
-        self._releaseevents_to_pass: Set[KeyEvent] = set()
+        self._releaseevents_to_pass: Set[keyutils.KeyEvent] = set()
         # Set after __init__
         self.hintmanager = cast(hints.HintManager, None)
         # TODO: type hints
@@ -347,7 +281,7 @@ class ModeManager(QObject):
         had_empty_queue = not self._partial_match_events
         if (not dry_run) and (not had_empty_queue):
             self._partial_match_events.append(
-                QueuedKeyEventPair.from_event_press(event))
+                    keyutils.QueuedKeyEventPair.from_event_press(event))
 
         match = parser.handle(event, dry_run=dry_run)
 
@@ -362,7 +296,7 @@ class ModeManager(QObject):
             if not dry_run:
                 if had_empty_queue:
                     self._partial_match_events.append(
-                        QueuedKeyEventPair.from_event_press(event))
+                            keyutils.QueuedKeyEventPair.from_event_press(event))
                 self._start_partial_timer()
         elif not had_empty_queue:
             filter_this = True
@@ -374,7 +308,7 @@ class ModeManager(QObject):
             filter_this = not self._should_forward_event(key_info, parser)
 
         if not filter_this and not dry_run:
-            self._releaseevents_to_pass.add(KeyEvent.from_event(event))
+            self._releaseevents_to_pass.add(keyutils.KeyEvent.from_event(event))
 
         if curmode != usertypes.KeyMode.insert:
             has_modifier = event.modifiers() not in [
@@ -406,7 +340,7 @@ class ModeManager(QObject):
             True if event should be filtered, False otherwise.
         """
         # handle like matching KeyPress
-        keyevent = KeyEvent.from_event(event)
+        keyevent = keyutils.KeyEvent.from_event(event)
         if keyevent in self._releaseevents_to_pass:
             self._releaseevents_to_pass.remove(keyevent)
             filter_this = False
@@ -428,7 +362,8 @@ class ModeManager(QObject):
         is_non_alnum = has_modifier or not key_info.text().strip()
         forward_unbound_keys = config.cache['input.forward_unbound_keys']
         return (parser.passthrough or forward_unbound_keys == 'all' or
-            (forward_unbound_keys == 'auto' and is_non_alnum))
+            (forward_unbound_keys == 'auto' and is_non_alnum)) and (
+            not isinstance(parser, modeparsers.HintKeyParser))
 
     @pyqtSlot(usertypes.KeyMode, str)
     def forward_partial_match_event(self, mode: usertypes.KeyMode, text: str = None) -> None:
@@ -455,7 +390,14 @@ class ModeManager(QObject):
                 self._releaseevents_to_pass.add(match_event.key_event)
 
     @pyqtSlot(usertypes.KeyMode)
-    def forward_all_partial_match_events(self, mode: usertypes.KeyMode) -> None:
+    def forward_all_partial_match_events(self, mode: usertypes.KeyMode, *,
+                                         stop_timer: bool = False) -> None:
+        if stop_timer:
+            self._stop_partial_timer()
+        if mode in self.parsers:
+            parser = self.parsers[mode]
+            if isinstance(parser, modeparsers.HintKeyParser):
+                parser.forward_all_partial_match_events(stop_timer=True)
         if self._partial_match_events:
             while self._partial_match_events:
                 self.forward_partial_match_event(mode)
@@ -479,15 +421,13 @@ class ModeManager(QObject):
                 self._partial_timer.timeout.disconnect()
             except TypeError:
                 pass
-            self._partial_timer.timeout.connect(
-                functools.partial(self.forward_all_partial_match_events, self.mode))
+            self._partial_timer.timeout.connect(functools.partial(
+                    self.forward_all_partial_match_events, self.mode))
             self._partial_timer.start()
 
     def _stop_partial_timer(self) -> None:
         """Prematurely stop the the partial keystring timer."""
-        timeout = config.val.input.partial_timeout
-        if self.parsers[self.mode].allow_partial_timeout and (timeout != 0):
-            self._partial_timer.stop()
+        self._partial_timer.stop()
 
     def register(self, mode: usertypes.KeyMode,
                  parser: basekeyparser.BaseKeyParser) -> None:
@@ -604,9 +544,8 @@ class ModeManager(QObject):
         self.leave(self.mode, 'leave current')
 
     def change_mode(self, mode: usertypes.KeyMode) -> None:
-        self._stop_partial_timer()
         # catches the case where change of mode is not keys, e.g. mouse click
-        self.forward_all_partial_match_events(self.mode)
+        self.forward_all_partial_match_events(self.mode, stop_timer=True)
         self.mode = mode
 
     def handle_event(self, event: QEvent) -> bool:
