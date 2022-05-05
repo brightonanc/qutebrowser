@@ -8,7 +8,8 @@ from PyQt5.QtWidgets import QApplication
 
 import functools
 import dataclasses
-from typing import Mapping, Callable, MutableMapping, Union, Set, cast, Tuple
+from typing import Mapping, Callable, MutableMapping, Union, Set, cast, \
+    Tuple, Sequence
 
 from qutebrowser.qt import machinery
 from qutebrowser.qt.core import pyqtSlot, pyqtSignal, Qt, QObject, QEvent

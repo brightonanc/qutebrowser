@@ -18,7 +18,7 @@ handle what we actually think we do.
 
 import itertools
 import dataclasses
-from typing import Iterator, Iterable, List, Tuple, Mapping, Optional, Union, overload, cast
+from typing import Iterator, Iterable, List, Sequence, Mapping, Optional, Union, overload, cast
 
 from qutebrowser.qt import machinery
 from qutebrowser.qt.core import Qt, QEvent
@@ -544,7 +544,7 @@ class QueuedKeyEventPair:
 
     key_event: KeyEvent
     key_info_press: KeyInfo
-    key_info_release: KeyInfo
+    key_info_release: Union[KeyInfo, None]
 
     @classmethod
     def from_event_press(cls, event: QKeyEvent) -> 'QueuedKeyEventPair':
@@ -561,7 +561,7 @@ class QueuedKeyEventPair:
     def is_released(self) -> bool:
         return self.key_info_release is not None
 
-    def to_events(self) -> Tuple[QKeyEvent]:
+    def to_events(self) -> Sequence[QKeyEvent]:
         """Get a QKeyEvent from this QueuedEvent."""
         if self.key_info_release is None:
             return (self.key_info_press.to_event(QEvent.KeyPress),)
