@@ -124,7 +124,7 @@ def test_mixed_count(keyparser, config_stub, input_key, final_count, final_match
             elif result == QKeySequence.PartialMatch:
                 assert keyparser._count == str(final_count)
             else:
-                assert False, 'Not Implemented'
+                pytest.fail('Not Implemented')
 
 
 def test_empty_binding(keyparser, config_stub):
@@ -364,8 +364,13 @@ class TestHandle:
         keyparser.execute.assert_not_called()
         seq = list(seq) + [Qt.Key_Z]
         signals = [keyparser.forward_partial_key] * len(seq)
+        info = keyutils.KeyInfo(seq[-1], Qt.NoModifier)
+        result = keyparser.handle(info.to_event(), dry_run=True)
+        assert result == QKeySequence.NoMatch
         with qtbot.wait_signals(signals) as blocker:
-            handle_text(keyparser, seq[-1])
+            result = keyparser.handle(info.to_event())
+            assert result == QKeySequence.NoMatch
+        assert blocker.signal_triggered
         assert forward_partial_key.call_args_list == [
             ((str(keyutils.KeyInfo(key, Qt.NoModifier)),),) for key in seq
         ]
@@ -413,6 +418,25 @@ class TestHandle:
             str(keyutils.KeyInfo(key, Qt.NoModifier)) for key in count_seq
         )
         assert keyparser._sequence == keyseq('f')
+
+    def test_expansive_mapping(self, config_stub, keyparser):
+        config_stub.val.bindings.key_mappings = {
+            'x': 'ab'
+        }
+        config_stub.val.bindings.commands = {
+            'normal': {
+                'abc': 'message-info abc'
+            }
+        }
+
+        result = keyparser.handle(
+            keyutils.KeyInfo(Qt.Key_X, Qt.NoModifier).to_event())
+        assert result == QKeySequence.PartialMatch
+        result = keyparser.handle(
+            keyutils.KeyInfo(Qt.Key_2, Qt.NoModifier).to_event())
+        # Check that count is not evaluated when an expansive mapping occurs.
+        # This behavior may change in the future.
+        assert result == QKeySequence.NoMatch
 
 
 class TestCount:
@@ -503,5 +527,3 @@ def test_respect_config_when_matching_counts(keyparser, config_stub):
 
     assert not keyparser._sequence
     assert not keyparser._count
-
-

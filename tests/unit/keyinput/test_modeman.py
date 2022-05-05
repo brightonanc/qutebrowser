@@ -19,11 +19,11 @@
 
 import pytest
 
-from PyQt5.QtCore import Qt, QObject, pyqtSignal, QTimer
+from PyQt5.QtCore import Qt, QObject, pyqtSignal, QTimer, QEvent
 from PyQt5.QtGui import QKeySequence
 
-from qutebrowser.utils import usertypes
-from qutebrowser.keyinput import keyutils
+from qutebrowser.utils import usertypes, objreg
+from qutebrowser.keyinput import keyutils, basekeyparser
 from qutebrowser.misc import objects
 
 
@@ -115,9 +115,12 @@ def modeman_with_timeout(mode_manager):
     ((Qt.Key_B, 'timer_active'), (Qt.Key_A, 'timer_inactive'),),
     ((Qt.Key_B, 'timer_active'), (Qt.Key_B, 'timer_reset'),),
     ((Qt.Key_B, 'timer_active'), (Qt.Key_C, 'timer_inactive'),),
-    ((Qt.Key_B, 'timer_active'), (Qt.Key_B, 'timer_reset'), (Qt.Key_A, 'timer_inactive'),),
-    ((Qt.Key_B, 'timer_active'), (Qt.Key_B, 'timer_reset'), (Qt.Key_B, 'timer_reset'),),
-    ((Qt.Key_B, 'timer_active'), (Qt.Key_B, 'timer_reset'), (Qt.Key_C, 'timer_inactive'),),
+    ((Qt.Key_B, 'timer_active'), (Qt.Key_B, 'timer_reset'), (Qt.Key_A,
+        'timer_inactive'),),
+    ((Qt.Key_B, 'timer_active'), (Qt.Key_B, 'timer_reset'), (Qt.Key_B,
+        'timer_reset'),),
+    ((Qt.Key_B, 'timer_active'), (Qt.Key_B, 'timer_reset'), (Qt.Key_C,
+        'timer_inactive'),),
 ])
 def test_partial_keychain_timeout(modeman_with_timeout, config_stub, qtbot, data_sequence):
     """Test partial keychain timeout behavior."""
@@ -128,6 +131,7 @@ def test_partial_keychain_timeout(modeman_with_timeout, config_stub, qtbot, data
     parser = modeman_with_timeout.parsers[mode]
     assert not timer.isActive()
 
+    behavior = None
     for key, behavior in data_sequence:
         keyinfo = keyutils.KeyInfo(key, Qt.NoModifier)
         if behavior == 'timer_active':
@@ -154,8 +158,7 @@ def test_partial_keychain_timeout(modeman_with_timeout, config_stub, qtbot, data
             assert (timeout - (timeout//4)) < timer.remainingTime()
             assert timer.isActive()
         else:
-            # Unreachable
-            assert False
+            pytest.fail('Unreachable')
     if behavior in ['timer_active', 'timer_reset']:
         # Now simulate a timeout and check the keystring has been cleared.
         with qtbot.wait_signal(modeman_with_timeout.keystring_updated) as blocker:
@@ -164,3 +167,87 @@ def test_partial_keychain_timeout(modeman_with_timeout, config_stub, qtbot, data
         parser.fake_clear_keystring_called = False
         assert blocker.args == [mode, '']
 
+
+class FakeEventFilter(QObject):
+    def eventFilter(self, obj: QObject, event: QEvent) -> bool:
+        return True
+
+
+@pytest.fixture
+def modeman_with_basekeyparser(mode_manager, config_stub):
+    fake_event_filter = FakeEventFilter()
+    objreg.register('fake-event-filter', fake_event_filter, scope='window',
+        window=0)
+    config_stub.val.bindings.default = {}
+    config_stub.val.bindings.commands = {
+        'normal': {
+            'bb': 'message-info bb',
+            'byy': 'message-info byy',
+        }
+    }
+    config_stub.val.bindings.key_mappings = {}
+    mode = usertypes.KeyMode.normal
+    mode_manager.register(mode,
+        basekeyparser.BaseKeyParser(mode=mode,
+                                    win_id=0,
+                                    passthrough=True,
+                                    forward_widget_name='fake-event-filter'))
+    yield mode_manager
+    objreg.delete('fake-event-filter', scope='window', window=0)
+
+
+def test_release_forwarding(modeman_with_basekeyparser):
+    mwb = modeman_with_basekeyparser
+
+    info_b = keyutils.KeyInfo(Qt.Key_B, Qt.NoModifier)
+    info_c = keyutils.KeyInfo(Qt.Key_C, Qt.NoModifier)
+
+    res = mwb.handle_event(info_b.to_event(QEvent.KeyPress))
+    assert res
+    assert 1 == len(mwb._partial_match_events)
+    assert not mwb._partial_match_events[0].is_released()
+    assert 0 == len(mwb._releaseevents_to_pass)
+    res = mwb.handle_event(info_c.to_event(QEvent.KeyPress))
+    assert res
+    assert 0 == len(mwb._partial_match_events)
+    assert 2 == len(mwb._releaseevents_to_pass)
+    res = mwb.handle_event(info_b.to_event(QEvent.KeyRelease))
+    assert not res
+    assert 0 == len(mwb._partial_match_events)
+    assert 1 == len(mwb._releaseevents_to_pass)
+    res = mwb.handle_event(info_c.to_event(QEvent.KeyRelease))
+    assert not res
+    assert 0 == len(mwb._partial_match_events)
+    assert 0 == len(mwb._releaseevents_to_pass)
+
+    info_y = keyutils.KeyInfo(Qt.Key_Y, Qt.NoModifier)
+
+    res = mwb.handle_event(info_b.to_event(QEvent.KeyPress))
+    assert res
+    assert 1 == len(mwb._partial_match_events)
+    assert not mwb._partial_match_events[0].is_released()
+    assert 0 == len(mwb._releaseevents_to_pass)
+    res = mwb.handle_event(info_y.to_event(QEvent.KeyPress))
+    assert res
+    assert 2 == len(mwb._partial_match_events)
+    assert not mwb._partial_match_events[0].is_released()
+    assert not mwb._partial_match_events[1].is_released()
+    assert 0 == len(mwb._releaseevents_to_pass)
+    res = mwb.handle_event(info_y.to_event(QEvent.KeyRelease))
+    assert res
+    assert 2 == len(mwb._partial_match_events)
+    assert not mwb._partial_match_events[0].is_released()
+    assert mwb._partial_match_events[1].is_released()
+    assert 0 == len(mwb._releaseevents_to_pass)
+    res = mwb.handle_event(info_c.to_event(QEvent.KeyPress))
+    assert res
+    assert 0 == len(mwb._partial_match_events)
+    assert 2 == len(mwb._releaseevents_to_pass)
+    res = mwb.handle_event(info_c.to_event(QEvent.KeyRelease))
+    assert not res
+    assert 0 == len(mwb._partial_match_events)
+    assert 1 == len(mwb._releaseevents_to_pass)
+    res = mwb.handle_event(info_b.to_event(QEvent.KeyRelease))
+    assert not res
+    assert 0 == len(mwb._partial_match_events)
+    assert 0 == len(mwb._releaseevents_to_pass)
