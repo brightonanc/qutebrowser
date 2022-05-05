@@ -22,7 +22,8 @@ from PyQt5.QtWidgets import QApplication
 
 import functools
 import dataclasses
-from typing import Mapping, Callable, MutableMapping, Union, Set, cast, Tuple
+from typing import Mapping, Callable, MutableMapping, Union, Set, cast, \
+    Tuple, Sequence
 
 from PyQt5.QtCore import pyqtSlot, pyqtSignal, Qt, QObject, QEvent
 from PyQt5.QtGui import QKeyEvent, QKeySequence

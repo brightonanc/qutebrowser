@@ -34,7 +34,7 @@ handle what we actually think we do.
 import itertools
 import dataclasses
 from typing import cast, overload, Iterable, Iterator, List, Mapping, \
-    Optional, Union, Tuple
+    Optional, Union, Sequence
 
 from PyQt5.QtCore import Qt, QEvent
 from PyQt5.QtGui import QKeySequence, QKeyEvent
@@ -471,7 +471,7 @@ class QueuedKeyEventPair:
 
     key_event: KeyEvent
     key_info_press: KeyInfo
-    key_info_release: KeyInfo
+    key_info_release: Union[KeyInfo, None]
 
     @classmethod
     def from_event_press(cls, event: QKeyEvent) -> 'QueuedKeyEventPair':
@@ -488,7 +488,7 @@ class QueuedKeyEventPair:
     def is_released(self) -> bool:
         return self.key_info_release is not None
 
-    def to_events(self) -> Tuple[QKeyEvent]:
+    def to_events(self) -> Sequence[QKeyEvent]:
         """Get a QKeyEvent from this QueuedEvent."""
         if self.key_info_release is None:
             return (self.key_info_press.to_event(QEvent.KeyPress),)

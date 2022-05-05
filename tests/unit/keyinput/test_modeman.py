@@ -40,6 +40,8 @@ class FakeKeyparser(QObject):
         super().__init__()
         self.passthrough = False
         self.allow_partial_timeout = False
+        self.allow_forward = True
+        self.forward_widget_name = None
 
     def handle(self, evt, *, dry_run=False):
         return QKeySequence.NoMatch
@@ -82,6 +84,8 @@ class FakeKeyparserWithTimeout(QObject):
         super().__init__()
         self.passthrough = False
         self.allow_partial_timeout = True
+        self.allow_forward = True
+        self.forward_widget_name = None
         self.fake_clear_keystring_called = False
 
     def handle(self, evt, *, dry_run=False):

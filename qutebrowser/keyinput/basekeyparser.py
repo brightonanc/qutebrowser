@@ -212,7 +212,7 @@ class BaseKeyParser(QObject):
         self._pure_sequence = keyutils.KeySequence()
         self._sequence = keyutils.KeySequence()
         self._count = ''
-        self._count_keyposs = []
+        self._count_keyposs: Sequence[int] = []
         self._mode = mode
         self._do_log = do_log
         self.passthrough = passthrough
@@ -319,8 +319,10 @@ class BaseKeyParser(QObject):
                         "dry_run {}".format(key, int(e.modifiers()), txt,
                                             dry_run))
 
-        # Modifier keys handled in modeman
-        assert not keyutils.is_modifier_key(key)
+        # Modifier keys should be previously handled by modeman
+        if keyutils.is_modifier_key(key):
+            self._debug_log("Ignoring, only modifier")
+            return QKeySequence.NoMatch
 
         had_empty_queue = (not self._pure_sequence) and (not self._count)
 
@@ -459,7 +461,9 @@ class BaseKeyParser(QObject):
 
     def clear_keystring(self) -> None:
         """Clear the currently entered key sequence."""
+        do_emit = False
         if self._count:
+            do_emit = True
             self._debug_log("Clearing keystring count (was: {}).".format(
                 self._count))
             self._count = ''
@@ -467,8 +471,10 @@ class BaseKeyParser(QObject):
         # self._pure_sequence should non-empty if and only if self._sequence is
         # non-empty, but to be safe both conditions are included below
         if self._pure_sequence or self._sequence:
+            do_emit = True
             self._debug_log("Clearing keystring (was: {}).".format(
                 self._sequence))
             self._pure_sequence = keyutils.KeySequence()
             self._sequence = keyutils.KeySequence()
-        self.keystring_updated.emit('')
+        if do_emit:
+            self.keystring_updated.emit('')
