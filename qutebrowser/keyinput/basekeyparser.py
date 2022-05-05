@@ -7,7 +7,7 @@
 import string
 import types
 import dataclasses
-from typing import Mapping, MutableMapping, Optional, Sequence
+from typing import Mapping, MutableMapping, Optional, Sequence, List
 
 from qutebrowser.qt.core import QObject, pyqtSignal, pyqtSlot
 from qutebrowser.qt.gui import QKeySequence, QKeyEvent
@@ -197,7 +197,7 @@ class BaseKeyParser(QObject):
         self._pure_sequence = keyutils.KeySequence()
         self._sequence = keyutils.KeySequence()
         self._count = ''
-        self._count_keyposs: Sequence[int] = []
+        self._count_keyposs: List[int] = []
         self._mode = mode
         self._do_log = do_log
         self.passthrough = passthrough
@@ -408,10 +408,10 @@ class BaseKeyParser(QObject):
             assert result.command is not None
             self._debug_log("Definitive match for '{}'.".format(
                 result.sequence))
-            count = int(self._count) if self._count else None
+            count_int = int(self._count) if self._count else None
             self.clear_partial_keys.emit()
             self.clear_keystring()
-            self.execute(result.command, count)
+            self.execute(result.command, count_int)
         elif result.match_type == QKeySequence.SequenceMatch.PartialMatch:
             self._debug_log("No match for '{}' (added {})".format(
                 result.sequence, info))
