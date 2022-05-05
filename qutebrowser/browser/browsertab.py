@@ -1116,7 +1116,7 @@ class AbstractTab(QWidget):
         evt.posted = True  # type: ignore[attr-defined]
         QApplication.postEvent(recipient, evt)
 
-    def send_event(self, evt: QEvent) -> bool:
+    def send_event(self, evt: QEvent) -> Optional[bool]:
         """Send the given event to the underlying widget.
 
         The event will be sent via QApplication.sendEvent.
@@ -1133,7 +1133,7 @@ class AbstractTab(QWidget):
         if recipient is None:
             # https://github.com/qutebrowser/qutebrowser/issues/3888
             log.webview.warning("Unable to find event target!")
-            return
+            return None
 
         evt.posted = True  # type: ignore[attr-defined]
         return QApplication.sendEvent(recipient, evt)
