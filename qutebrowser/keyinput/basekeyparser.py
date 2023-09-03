@@ -9,7 +9,7 @@ import types
 import dataclasses
 from typing import Mapping, MutableMapping, Optional, Sequence, List
 
-from qutebrowser.qt.core import QObject, pyqtSignal, pyqtSlot
+from qutebrowser.qt.core import QObject, pyqtSignal
 from qutebrowser.qt.gui import QKeySequence, QKeyEvent
 
 from qutebrowser.config import config
@@ -285,7 +285,7 @@ class BaseKeyParser(QObject):
             return True
         return False
 
-    def handle(self, e: QKeyEvent, *,
+    def handle(self, e: QKeyEvent, *,  # noqa: C901
                dry_run: bool = False) -> QKeySequence.SequenceMatch:
         """Handle a new keypress.
 
@@ -376,7 +376,7 @@ class BaseKeyParser(QObject):
                                 "key in the sequence and retry.".format(
                                     result.sequence))
                 # Forward all the leading count keys
-                while count_keyposs and (0 == count_keyposs[0]):
+                while count_keyposs and (count_keyposs[0] == 0):
                     self._debug_log("Hit a queued count key ('{}'). "
                                     "Forwarding.".format(count[0]))
                     count = count[1:]
@@ -403,7 +403,11 @@ class BaseKeyParser(QObject):
 
         if dry_run:
             return result.match_type
+        self._handle_result(info, result)
+        return result.match_type
 
+    def _handle_result(self, info: keyutils.KeyInfo, result: MatchResult) -> None:
+        """Handle a final MatchResult from handle()."""
         # Each of the three following blocks need to emit
         # self.keystring_updated, either directly (as PartialMatch does) or
         # indirectly (as ExactMatch and NoMatch do via self.clear_keystring)
@@ -411,10 +415,11 @@ class BaseKeyParser(QObject):
             assert result.command is not None
             self._debug_log("Definitive match for '{}'.".format(
                 result.sequence))
-            count_int = int(self._count) if self._count else None
+            # note: this 'count' is an int, not a str
+            count = int(self._count) if self._count else None
             self.clear_partial_keys.emit()
             self.clear_keystring()
-            self.execute(result.command, count_int)
+            self.execute(result.command, count)
         elif result.match_type == QKeySequence.SequenceMatch.PartialMatch:
             self._debug_log("No match for '{}' (added {})".format(
                 result.sequence, info))
@@ -426,8 +431,6 @@ class BaseKeyParser(QObject):
         else:
             raise utils.Unreachable("Invalid match value {!r}".format(
                 result.match_type))
-
-        return result.match_type
 
     @config.change_filter('bindings')
     def _on_config_changed(self) -> None:
